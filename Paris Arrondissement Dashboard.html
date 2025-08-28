@@ -6,10 +6,15 @@
 <title>Paris Arrondissement Dashboard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-  :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --line:#1f2937; --muted:#9ca3af; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif; }
-  header { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  header h1 { margin:0; font-size:20px; font-weight:650; }
+  :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --line:#1f2937; --muted:#9ca3af; --accent:#60a5fa; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif; scroll-behavior:smooth; }
+  a{ color:var(--accent); }
+  header { padding:14px 16px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0 0 4px 0; font-size:20px; font-weight:700; }
+  .muted { color:var(--muted); }
+  .topnav { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { background:#0b1220; border:1px solid var(--line); color:#e5e7eb; border-radius:999px; padding:8px 12px; font-size:13px; cursor:pointer; }
+  .chip:active { transform: translateY(1px); }
   .wrap { display:grid; grid-template-columns:1fr 420px; gap:14px; padding:14px; max-width:1400px; margin:0 auto; }
   @media (max-width: 980px){ .wrap { grid-template-columns: 1fr; } }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; }
@@ -25,28 +30,38 @@
   .btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
   button { background:#0b1220; color:#e5e7eb; border:1px solid var(--line); border-radius:10px; padding:8px 10px; font-size:13px; cursor:pointer; }
   button:hover { background:#0f1628; }
-  .muted { color:var(--muted); font-size:12px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { padding:8px 10px; border-bottom:1px solid var(--line); }
   th { text-align:left; color:#cbd5e1; cursor:pointer; position:sticky; top:0; background:var(--card); }
   tbody tr:hover { background:#0b1220; }
-  #err { display:none; background:#7f1d1d; color:#fff; padding:8px; border-radius:8px; margin:10px 16px; white-space:pre-wrap; }
+  .section-title{ padding:0 14px; margin:8px auto 0; max-width:1400px; font-size:14px; color:#cbd5e1; }
+  #err { display:none; background:#7f1d1d; color:#fff; padding:10px 12px; border-radius:10px; margin:10px 16px; white-space:pre-wrap; }
+  #loading { display:block; background:#0b1220; color:#cbd5e1; padding:10px 12px; border-radius:10px; margin:10px 16px; }
+  .toplink{ display:inline-block; margin-left:8px; font-size:12px; }
 </style>
 </head>
 <body>
-<header>
+<header id="top">
   <h1>Paris Arrondissement Dashboard</h1>
-  <div class="muted">Single-file app + one JSON file. Mobile-friendly. Check datasets to build a simple (unweighted) composite. Red = highest, green = lowest.</div>
+  <div class="muted">Choose datasets to build a simple (unweighted) composite. Red = higher score, green = lower.</div>
+  <div class="topnav">
+    <a class="chip" href="#mapSection">Go to Map</a>
+    <a class="chip" href="#settingsSection">Go to Settings</a>
+    <a class="chip" href="#scoresSection">Go to Scores</a>
+  </div>
 </header>
 
+<div id="loading">Loading map geometry…</div>
 <div id="err"></div>
 
+<div class="section-title" id="mapSection">Map</div>
 <div class="wrap">
   <div class="card map-wrap">
     <div class="badge" id="badge">Average of: PE — Qualité, Culture, Transports, Commerces, Environnement, Sécurité</div>
-    <div id="map" class="map"></div>
+    <div id="map" class="map" role="region" aria-label="Paris map heat layer"></div>
   </div>
-  <div class="card panel">
+
+  <div class="card panel" id="settingsSection">
     <div style="font-size:14px; margin-bottom:6px;">Datasets</div>
     <div id="checkContainer"></div>
     <div class="btns">
@@ -62,74 +77,31 @@
   </div>
 </div>
 
+<div class="section-title" id="scoresSection">Scores <a class="toplink" href="#top">Back to top ↑</a></div>
 <div class="card panel" style="max-width:1400px; margin:0 auto 16px; overflow:auto;">
-  <div style="font-size:14px; margin-bottom:6px;">Composite scores (current selection)</div>
-  <table id="scoreTable">
+  <table id="scoreTable" aria-label="Score table">
     <thead></thead>
     <tbody></tbody>
   </table>
-  <div class="muted">Tip: click any column header to sort; click again to toggle ascending/descending.</div>
+  <div class="muted" style="margin-top:6px;">Tip: tap a column header to sort; tap again to toggle ascending/descending.</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
-  function showErr(e){
+  // ---------- helpers ----------
+  function showErr(msg){
     const box=document.getElementById('err');
+    const load=document.getElementById('loading');
+    if (load) load.style.display='none';
     box.style.display='block';
-    box.textContent=(e&&e.stack)?e.stack:String(e);
-    console.error(e);
+    box.textContent=msg;
+    console.error(msg);
   }
-  // ----- Data sources (scores) -----
-  const SOURCES = {
-    'jay': { label:'Jay — YouTube', url:'https://youtu.be/mMikt4FlXRM?si=grOt9HbVgLVbWN9u' },
-    'pe:qualite': { label:'PE — Qualité', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
-    'pe:culture': { label:'PE — Culture', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
-    'pe:transports': { label:'PE — Transports', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
-    'pe:commerces': { label:'PE — Commerces', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
-    'pe:environnement': { label:'PE — Environnement', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
-    'pe:securite': { label:'PE — Sécurité', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' }
-  };
-  const JAY = {"10":5,"9":4,"11":4,"19":4,"2":3,"3":3,"5":3,"6":3,"12":3,"18":3,"1":2,"4":2,"13":2,"17":2,"20":2,"7":1,"14":1,"15":1,"8":0,"16":0};
-  const PE  = {
-    "pe:qualite": {"1":6.5,"2":5.63,"3":8.06,"4":6.44,"5":8.29,"6":7.29,"7":7.08,"8":7.6,"9":7.96,"10":4.37,"11":6.58,"12":7.55,"13":6.5,"14":5.81,"15":7.2,"16":7.54,"17":7.41,"18":4.84,"19":5.95,"20":5.62},
-    "pe:culture": {"1":8.7,"2":7.81,"3":9.25,"4":7.94,"5":8.33,"6":8.14,"7":7.38,"8":7,"9":8.83,"10":6.01,"11":6.61,"12":6.82,"13":6.88,"14":6.4,"15":6.37,"16":6.69,"17":6.78,"18":6.04,"19":5.95,"20":6.21},
-    "pe:transports": {"1":9.3,"2":8,"3":8,"4":8.44,"5":8.5,"6":8.79,"7":8,"8":8.9,"9":9.13,"10":7.79,"11":8.1,"12":8.44,"13":8.38,"14":7.27,"15":8.14,"16":7.22,"17":7.24,"18":7.12,"19":7.35,"20":7.4},
-    "pe:commerces": {"1":8.3,"2":8.19,"3":9.31,"4":7.31,"5":8.17,"6":7.93,"7":6.62,"8":7.4,"9":8.96,"10":6.31,"11":7.64,"12":7.82,"13":7.91,"14":7.52,"15":8.17,"16":7,"17":7.54,"18":6.74,"19":6.56,"20":6.95},
-    "pe:environnement": {"1":4.4,"2":3,"3":6.25,"4":7.5,"5":8.67,"6":8.43,"7":6.77,"8":7.1,"9":5.7,"10":2.87,"11":5.01,"12":6.81,"13":5.58,"14":5.77,"15":5.9,"16":7.28,"17":6.17,"18":3.52,"19":5.42,"20":4.44},
-    "pe:securite": {"1":5.6,"2":5.88,"3":8.63,"4":7.88,"5":8.21,"6":7.57,"7":7.92,"8":7.1,"9":6.35,"10":3.51,"11":5.7,"12":6.67,"13":5.42,"14":5.16,"15":6.88,"16":7.81,"17":6.81,"18":3.97,"19":4.58,"20":4.83}
-  };
-  const DATASETS = {
-    'jay': JAY,
-    'pe:qualite': PE['pe:qualite'],
-    'pe:culture': PE['pe:culture'],
-    'pe:transports': PE['pe:transports'],
-    'pe:commerces': PE['pe:commerces'],
-    'pe:environnement': PE['pe:environnement'],
-    'pe:securite': PE['pe:securite']
-  };
-
-  // UI
-  const container = document.getElementById('checkContainer');
-  Object.keys(SOURCES).forEach((k)=>{
-    const row = document.createElement('div'); row.className='row';
-    const left = document.createElement('div'); left.className='left';
-    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=k; cb.className='srcbox'; cb.checked = k.indexOf('pe:')===0;
-    const label = document.createElement('label'); label.textContent = SOURCES[k].label;
-    const a = document.createElement('a'); a.href=SOURCES[k].url; a.target='_blank'; a.rel='noopener'; a.textContent='source ↗';
-    left.appendChild(cb); left.appendChild(label); left.appendChild(a); row.appendChild(left); container.appendChild(row);
-  });
-
-  // Map
-  const map = L.map('map', { zoomSnap: 0.25, tap: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-  function invalidate(){ try { map.invalidateSize(); } catch(e){} }
-  window.addEventListener('load', ()=>setTimeout(invalidate,300));
-  window.addEventListener('resize', ()=>setTimeout(invalidate,150));
-  window.addEventListener('orientationchange', ()=>setTimeout(invalidate,150));
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) setTimeout(invalidate,150); });
-
-  // Utils
+  function hideLoading(){
+    const load=document.getElementById('loading');
+    if (load) load.style.display='none';
+  }
   function arrNum(props){ return props.c_ar || props.arr || props.num || props.numero || props.num_ar || null; }
   function interp(a,b,t){ return a+(b-a)*t; }
   function rgb(r,g,b){ return 'rgb('+Math.round(r)+','+Math.round(g)+','+Math.round(b)+')'; }
@@ -174,16 +146,68 @@
     const r = Math.round(v*100)/100;
     return (Math.abs(r - Math.round(r)) < 0.005) ? String(Math.round(r)) : r.toFixed(2);
   }
+
+  // ---------- datasets ----------
+  const SOURCES = {
+    'jay': { label:'Jay — YouTube', url:'https://youtu.be/mMikt4FlXRM?si=grOt9HbVgLVbWN9u' },
+    'pe:qualite': { label:'PE — Qualité', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
+    'pe:culture': { label:'PE — Culture', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
+    'pe:transports': { label:'PE — Transports', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
+    'pe:commerces': { label:'PE — Commerces', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
+    'pe:environnement': { label:'PE — Environnement', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' },
+    'pe:securite': { label:'PE — Sécurité', url:'https://www.parisenigmes.com/blog/guide-arrondissement-paris/' }
+  };
+  const JAY = {"10":5,"9":4,"11":4,"19":4,"2":3,"3":3,"5":3,"6":3,"12":3,"18":3,"1":2,"4":2,"13":2,"17":2,"20":2,"7":1,"14":1,"15":1,"8":0,"16":0};
+  const PE  = {
+    "pe:qualite": {"1":6.5,"2":5.63,"3":8.06,"4":6.44,"5":8.29,"6":7.29,"7":7.08,"8":7.6,"9":7.96,"10":4.37,"11":6.58,"12":7.55,"13":6.5,"14":5.81,"15":7.2,"16":7.54,"17":7.41,"18":4.84,"19":5.95,"20":5.62},
+    "pe:culture": {"1":8.7,"2":7.81,"3":9.25,"4":7.94,"5":8.33,"6":8.14,"7":7.38,"8":7,"9":8.83,"10":6.01,"11":6.61,"12":6.82,"13":6.88,"14":6.4,"15":6.37,"16":6.69,"17":6.78,"18":6.04,"19":5.95,"20":6.21},
+    "pe:transports": {"1":9.3,"2":8,"3":8,"4":8.44,"5":8.5,"6":8.79,"7":8,"8":8.9,"9":9.13,"10":7.79,"11":8.1,"12":8.44,"13":8.38,"14":7.27,"15":8.14,"16":7.22,"17":7.24,"18":7.12,"19":7.35,"20":7.4},
+    "pe:commerces": {"1":8.3,"2":8.19,"3":9.31,"4":7.31,"5":8.17,"6":7.93,"7":6.62,"8":7.4,"9":8.96,"10":6.31,"11":7.64,"12":7.82,"13":7.91,"14":7.52,"15":8.17,"16":7,"17":7.54,"18":6.74,"19":6.56,"20":6.95},
+    "pe:environnement": {"1":4.4,"2":3,"3":6.25,"4":7.5,"5":8.67,"6":8.43,"7":6.77,"8":7.1,"9":5.7,"10":2.87,"11":5.01,"12":6.81,"13":5.58,"14":5.77,"15":5.9,"16":7.28,"17":6.17,"18":3.52,"19":5.42,"20":4.44},
+    "pe:securite": {"1":5.6,"2":5.88,"3":8.63,"4":7.88,"5":8.21,"6":7.57,"7":7.92,"8":7.1,"9":6.35,"10":3.51,"11":5.7,"12":6.67,"13":5.42,"14":5.16,"15":6.88,"16":7.81,"17":6.81,"18":3.97,"19":4.58,"20":4.83}
+  };
+  const DATASETS = {
+    'jay': JAY,
+    'pe:qualite': PE['pe:qualite'],
+    'pe:culture': PE['pe:culture'],
+    'pe:transports': PE['pe:transports'],
+    'pe:commerces': PE['pe:commerces'],
+    'pe:environnement': PE['pe:environnement'],
+    'pe:securite': PE['pe:securite']
+  };
+
+  // ---------- build UI ----------
+  const container = document.getElementById('checkContainer');
+  Object.keys(SOURCES).forEach((k)=>{
+    const row = document.createElement('div'); row.className='row';
+    const left = document.createElement('div'); left.className='left';
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.value=k; cb.className='srcbox'; cb.checked = k.indexOf('pe:')===0;
+    const label = document.createElement('label'); label.textContent = SOURCES[k].label;
+    const a = document.createElement('a'); a.href=SOURCES[k].url; a.target='_blank'; a.rel='noopener'; a.textContent='source ↗';
+    left.appendChild(cb); left.appendChild(label); left.appendChild(a); row.appendChild(left); container.appendChild(row);
+  });
+
+  // ---------- map ----------
+  const map = L.map('map', { zoomSnap: 0.25, tap: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+  function invalidate(){ try { map.invalidateSize(); } catch(e){} }
+  window.addEventListener('load', ()=>setTimeout(invalidate,300));
+  window.addEventListener('resize', ()=>setTimeout(invalidate,150));
+  window.addEventListener('orientationchange', ()=>setTimeout(invalidate,150));
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) setTimeout(invalidate,150); });
+
   function drawTable(picked, rows, sortKey='avg', sortDir='desc'){
     const thead = document.querySelector('#scoreTable thead');
     const tbody = document.querySelector('#scoreTable tbody');
     thead.innerHTML=''; tbody.innerHTML='';
+
     const trh = document.createElement('tr');
     const hArr = document.createElement('th'); hArr.textContent='Arr.'; hArr.dataset.key='arr'; hArr.className='sortable';
     const hAvg = document.createElement('th'); hAvg.textContent='Average'; hAvg.dataset.key='avg'; hAvg.className='sortable';
     trh.appendChild(hArr); trh.appendChild(hAvg);
     picked.forEach((k)=>{ const th=document.createElement('th'); th.textContent=SOURCES[k].label; th.dataset.key=k; th.className='sortable'; trh.appendChild(th); });
     thead.appendChild(trh);
+
     rows.sort((a,b)=>{
       function val(row,key){
         if (key==='arr') return row.arr;
@@ -193,6 +217,7 @@
       const va = val(a, sortKey), vb = val(b, sortKey);
       return (sortDir==='asc') ? (va - vb) : (vb - va);
     });
+
     rows.forEach((r)=>{
       const tr=document.createElement('tr');
       const tdArr=document.createElement('td'); tdArr.textContent=r.arr; tr.appendChild(tdArr);
@@ -200,10 +225,12 @@
       picked.forEach((k)=>{ const td=document.createElement('td'); td.textContent=formatScore(r.parts[k]); tr.appendChild(td); });
       tbody.appendChild(tr);
     });
+
     Array.prototype.slice.call(thead.querySelectorAll('.sortable')).forEach((th)=>{
       th.onclick=()=>{ const key=th.dataset.key; const nextDir=(sortKey===key && sortDir==='desc')?'asc':'desc'; drawTable(picked, rows.slice(), key, nextDir); setTimeout(invalidate,50); };
     });
   }
+
   function makeLayer(geojson, scoreMap, label){
     const colorize = makeColorizer(scoreMap);
     return L.geoJSON(geojson, {
@@ -212,6 +239,7 @@
     });
   }
   function getPicked(){ return Array.prototype.slice.call(document.querySelectorAll('.srcbox:checked')).map(n=>n.value); }
+
   function refresh(ARR){
     const picked = getPicked();
     if (!picked.length) return;
@@ -225,21 +253,41 @@
     setTimeout(invalidate,50);
   }
 
-  // ---- Load geometry from same repo (arrondissements.json in repo root) ----
-  fetch('arrondissements.json', {cache:'no-store'})
-    .then(r=>{ if(!r.ok) throw new Error('Failed to load arrondissements.json ('+r.status+')'); return r.json(); })
+  // ---------- load geometry (root-relative) ----------
+  const jsonURL = (location.origin + location.pathname.replace(/[^/]*$/, '') + 'arrondissements.json');
+  fetch(jsonURL, {cache:'no-store'})
+    .then(r=>{ if(!r.ok) throw new Error('Failed to load arrondissements.json ('+r.status+') at ' + jsonURL); return r.json(); })
     .then((records)=>{
+      hideLoading();
       const ARR = toFeatureCollection(records);
       const bounds = L.geoJSON(ARR).getBounds();
       map.fitBounds(bounds, { padding:[12,12] });
+
       // wire UI
       document.getElementById('checkContainer').addEventListener('change', (e)=>{ if (e.target && e.target.classList.contains('srcbox')) refresh(ARR); });
       document.getElementById('allBtn').onclick=()=>{ Array.prototype.slice.call(document.querySelectorAll('.srcbox')).forEach(cb=>cb.checked=true); refresh(ARR); };
       document.getElementById('noneBtn').onclick=()=>{ Array.prototype.slice.call(document.querySelectorAll('.srcbox')).forEach(cb=>cb.checked=false); refresh(ARR); };
+
       // initial
       refresh(ARR);
     })
-    .catch(showErr);
+    .catch((e)=> showErr(e.message || String(e)));
+
+  // ---------- remaining helpers ----------
+  function computeCompositeDetail(picked){
+    if (!picked.length) return [];
+    const rows=[];
+    for (let a=1; a<=20; a++){
+      let sum=0, cnt=0; const detail={};
+      picked.forEach((k)=>{
+        const ds = DATASETS[k]; const v = ds ? Number(ds[String(a)]) : NaN;
+        detail[k] = isNaN(v) ? null : v;
+        if (!isNaN(v)){ sum+=v; cnt++; }
+      });
+      rows.push({ arr:a, avg: cnt? (sum/cnt) : null, parts: detail });
+    }
+    return rows;
+  }
 })();
 </script>
 </body>
